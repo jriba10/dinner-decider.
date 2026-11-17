@@ -55,16 +55,26 @@ $('findNearby').onclick=async()=>{
   const {Place}=await google.maps.importLibrary('places');
   const categories=['restaurant','fast_food_restaurant','cafe'];
   const found=new Map();
+  let nearbyError=null;
   for(const type of categories){
    status.textContent='Searching '+type.replaceAll('_',' ')+' near '+zip+'…';
-   const result=await Place.searchNearby({fields:['displayName','id'],locationRestriction:{center,radius:6500},includedPrimaryTypes:[type],maxResultCount:20});
-   for(const place of result.places||[]){const name=place.displayName?.trim();if(name)found.set(name.toLowerCase(),name)}
+   try{
+    const result=await Place.searchNearby({fields:['displayName','id'],locationRestriction:{center,radius:6500},includedPrimaryTypes:[type],maxResultCount:20});
+    for(const place of result.places||[]){const name=place.displayName?.trim();if(name)found.set(name.toLowerCase(),name)}
+   }catch(err){nearbyError=err;break}
+  }
+  if(nearbyError){
+   status.textContent='Nearby search unavailable. Trying restaurant text search…';
+   try{
+    const result=await Place.searchByText({textQuery:'restaurants and fast food near '+zip+', USA',fields:['displayName','id'],locationBias:{center,radius:6500},maxResultCount:20});
+    for(const place of result.places||[]){const name=place.displayName?.trim();if(name)found.set(name.toLowerCase(),name)}
+   }catch(textError){throw Error('Nearby search: '+(nearbyError.message||nearbyError)+'; text search: '+(textError.message||textError))}
   }
   const names=[...found.values()].sort((a,b)=>a.localeCompare(b));
   let added=0;
   for(const name of names)if(!restaurants.some(x=>x.toLowerCase()===name.toLowerCase())){restaurants.push(name);added++}
   save('restaurants',restaurants);renderList('restaurants');
-  status.textContent=names.length+' places found near '+zip+', '+added+' new saved. Results are limited to Google’s nearby search matches.';
+  status.textContent=names.length+' places found near '+zip+', '+added+' new saved. ';
   if(!names.length)backup.classList.remove('hidden');
  }catch(err){
   status.textContent='Google restaurant search failed: '+(err.message||'Unknown error')+'. Check that Maps JavaScript API and Places API (New) are enabled, billing is active, and the key permits this website. Your saved restaurants are safe.';
