@@ -22,6 +22,11 @@ $('voterName').addEventListener('input',renderVote);document.querySelectorAll('[
 function renderList(kind){const a=kind==='meals'?meals:restaurants,id=kind==='meals'?'mealList':'restaurantList';$(kind==='meals'?'mealCount':'restaurantCount').textContent=a.length+' saved';$(id).innerHTML=a.length?a.map((name,i)=>'<div class="item"><span>'+escapeHTML(name)+'</span><button class="tiny" data-remove="'+kind+'" data-index="'+i+'" aria-label="Remove '+escapeHTML(name)+'">✕</button></div>').join(''):'<p class="muted">Nothing saved yet.</p>';document.querySelectorAll('[data-remove="'+kind+'"]').forEach(b=>b.onclick=()=>{a.splice(Number(b.dataset.index),1);save(kind,a);renderList(kind);renderRotation();showWheel('')})}function add(kind){const input=$(kind==='meals'?'newMeal':'newRestaurant'),name=input.value.trim(),a=kind==='meals'?meals:restaurants;if(!name)return;if(a.some(x=>x.toLowerCase()===name.toLowerCase())){input.value='';return}a.push(name);save(kind,a);input.value='';renderList(kind);renderRotation()}$('addMeal').onclick=()=>add('meals');$('addRestaurant').onclick=()=>add('restaurants');$('newMeal').onkeydown=e=>{if(e.key==='Enter')add('meals')};$('newRestaurant').onkeydown=e=>{if(e.key==='Enter')add('restaurants')};$('resetMeals').onclick=()=>{if(confirm('Restore the original 30 meals? This replaces your current meal list.')){meals=[...defaults];save('meals',meals);renderList('meals');renderRotation()}};
 // Google Maps JavaScript Places library: the key is entered on each device,
 // not embedded in the public GitHub Pages source. Restrict it to the website.
+// Remember the ZIP and key for this browser and GitHub Pages origin.
+// A key must never be hardcoded into a public repository.
+const KEY_STORAGE='dinner_google_places_key';
+const ZIP_STORAGE='dinner_last_zip';
+$('zip').value=localStorage.getItem(ZIP_STORAGE)||'';
 let googleMapsLoader=null;
 function loadGoogleMaps(key){
  if(window.google?.maps?.importLibrary)return Promise.resolve();
@@ -29,9 +34,9 @@ function loadGoogleMaps(key){
  googleMapsLoader=new Promise((resolve,reject)=>{
   const callback='fourDnnrGoogleReady';
   const script=document.createElement('script');
-  const timer=setTimeout(()=>{delete window[callback];reject(Error('Google Maps loading timed out.'))},18000);
+  const timer=setTimeout(()=>{delete window[callback];script.remove();reject(Error('Google Maps loading timed out.'))},18000);
   window[callback]=()=>{clearTimeout(timer);delete window[callback];resolve()};
-  script.onerror=()=>{clearTimeout(timer);delete window[callback];reject(Error('Could not load Google Maps. Check your API key and network.'))};
+  script.onerror=()=>{clearTimeout(timer);delete window[callback];script.remove();reject(Error('Could not load Google Maps. Check your API key and network.'))};
   script.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&loading=async&callback='+callback+'&v=weekly';
   document.head.appendChild(script);
  }).catch(err=>{googleMapsLoader=null;throw err});
@@ -40,10 +45,11 @@ function loadGoogleMaps(key){
 $('findNearby').onclick=async()=>{
  const zip=$('zip').value.trim(),status=$('zipStatus'),btn=$('findNearby'),backup=$('restaurantBackup');
  if(!/^\d{5}$/.test(zip)){status.textContent='Enter a valid 5-digit US ZIP Code.';return}
+ localStorage.setItem(ZIP_STORAGE,zip);
  $('mapsFallback').href='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent('restaurants near '+zip+' USA');
  backup.classList.add('hidden');
- let key=localStorage.getItem('dinner_google_places_key')||'';
- if(!key){key=(prompt('Enter your Google Maps API key for restaurant search. It will be saved only in this browser, not in your public GitHub file.')||'').trim();if(!key){status.textContent='An API key is needed to search restaurants.';return}localStorage.setItem('dinner_google_places_key',key)}
+ let key=(localStorage.getItem(KEY_STORAGE)||'').trim();
+ if(!key){key=(prompt('Enter your Google Maps API key for restaurant search. It will be saved only in this browser, not in your public GitHub file.')||'').trim();if(!key){status.textContent='An API key is needed to search restaurants.';return}localStorage.setItem(KEY_STORAGE,key)}
  btn.disabled=true;status.textContent='Finding restaurants near '+zip+'…';
  try{
   await loadGoogleMaps(key);
@@ -53,28 +59,39 @@ $('findNearby').onclick=async()=>{
   if(!geocode.results?.length)throw Error('ZIP code not found.');
   const center=geocode.results[0].geometry.location;
   const {Place}=await google.maps.importLibrary('places');
-  const categories=['restaurant','fast_food_restaurant','cafe'];
+  // Search several complementary queries so one narrow category cannot hide the rest.
+  // Google limits each individual request; merge and deduplicate the results.
   const found=new Map();
-  let nearbyError=null;
-  for(const type of categories){
+  const errors=[];
+  const addPlaces=places=>{for(const place of places||[]){
+    const name=place.displayName?.trim();if(!name)continue;
+    // Deduplicate exact place IDs first, retaining distinct branches of a chain.
+    const id=place.id||name.toLowerCase();
+    found.set(id,name);
+  }};
+  const nearbyTypes=['restaurant','fast_food_restaurant','cafe'];
+  for(const type of nearbyTypes){
    status.textContent='Searching '+type.replaceAll('_',' ')+' near '+zip+'…';
    try{
-    const result=await Place.searchNearby({fields:['displayName','id'],locationRestriction:{center,radius:6500},includedPrimaryTypes:[type],maxResultCount:20});
-    for(const place of result.places||[]){const name=place.displayName?.trim();if(name)found.set(name.toLowerCase(),name)}
-   }catch(err){nearbyError=err;break}
+    const result=await Place.searchNearby({fields:['displayName','id'],locationRestriction:{center,radius:10000},includedPrimaryTypes:[type],maxResultCount:20});
+    addPlaces(result.places);
+   }catch(err){errors.push(type+': '+(err.message||err))}
   }
-  if(nearbyError){
-   status.textContent='Nearby search unavailable. Trying restaurant text search…';
+  // Text searches also find chains and venues that Google assigns to other primary types.
+  const queries=['restaurants near '+zip+', USA','fast food near '+zip+', USA','pizza Mexican Chinese food near '+zip+', USA'];
+  for(const query of queries){
+   status.textContent='Looking for more dining options near '+zip+'…';
    try{
-    const result=await Place.searchByText({textQuery:'restaurants and fast food near '+zip+', USA',fields:['displayName','id'],locationBias:{center,radius:6500},maxResultCount:20});
-    for(const place of result.places||[]){const name=place.displayName?.trim();if(name)found.set(name.toLowerCase(),name)}
-   }catch(textError){throw Error('Nearby search: '+(nearbyError.message||nearbyError)+'; text search: '+(textError.message||textError))}
+    const result=await Place.searchByText({textQuery:query,fields:['displayName','id'],locationBias:{center,radius:10000},maxResultCount:20});
+    addPlaces(result.places);
+   }catch(err){errors.push('Text search: '+(err.message||err))}
   }
-  const names=[...found.values()].sort((a,b)=>a.localeCompare(b));
+  if(!found.size&&errors.length)throw Error(errors.join('; '));
+  const names=[...new Set([...found.values()])].sort((a,b)=>a.localeCompare(b));
   let added=0;
   for(const name of names)if(!restaurants.some(x=>x.toLowerCase()===name.toLowerCase())){restaurants.push(name);added++}
   save('restaurants',restaurants);renderList('restaurants');
-  status.textContent=names.length+' places found near '+zip+', '+added+' new saved. ';
+  status.textContent=names.length+' restaurant names found near '+zip+', '+added+' new saved.'+(errors.length?' Some search methods were unavailable.':'');
   if(!names.length)backup.classList.remove('hidden');
  }catch(err){
   status.textContent='Google restaurant search failed: '+(err.message||'Unknown error')+'. Check that Maps JavaScript API and Places API (New) are enabled, billing is active, and the key permits this website. Your saved restaurants are safe.';
