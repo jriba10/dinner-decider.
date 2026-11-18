@@ -18,44 +18,46 @@ let person=profile?.name||'',pendingProposal=false,selectedCategory=null;
 let photoRequest=0;const photoCache=new Map();
 const foodAliases={'Spaghetti with Meat Sauce':'Spaghetti Bolognese','Cheeseburgers and Fries':'Beef Burger','Homemade Pizza':'Pizza','Chicken Alfredo':'Fettuccine Alfredo','Baked Ziti':'Baked Ziti','Chili and Cornbread':'Chilli','Chicken Parmesan':'Chicken Parmigiana','Chicken Fajitas':'Chicken Fajitas','Beef Stroganoff':'Beef Stroganoff','Chicken Pot Pie':'Chicken Pot Pie','Chef Salad':'Salad','Tacos':'Tacos','Sloppy Joes':'Sloppy Joe','Meatloaf and Mashed Potatoes':'Meatloaf','Grilled Cheese and Tomato Soup':'Grilled Cheese'};
 function hideMealPhoto(){photoRequest++;$('mealPhoto').style.display='none';$('mealPhotoImg').removeAttribute('src');$('revealImage').classList.add('hidden');$('revealImage').removeAttribute('src');$('revealPlaceholder').classList.remove('hidden')}
-// Prefer a dish-specific photograph from TheMealDB. For meals not in that
-// catalog, try Wikimedia Commons photographs, never illustrations or drawings.
-async function fetchCommonsPhoto(name){
- const query=(foodAliases[name]||name)+' food';
- const endpoint='https://commons.wikimedia.org/w/api.php?'+new URLSearchParams({action:'query',generator:'search',gsrsearch:'filetype:bitmap '+query,gsrnamespace:'6',gsrlimit:'12',prop:'imageinfo',iiprop:'url|mime|extmetadata',iiurlwidth:'900',format:'json',origin:'*'});
- try{
-  const response=await fetch(endpoint);if(!response.ok)return null;
-  const data=await response.json();
-  const words=(foodAliases[name]||name).toLowerCase().split(/[^a-z]+/).filter(w=>w.length>3&&!['with','and','homemade','baked','grilled'].includes(w));
-  const candidates=Object.values(data.query?.pages||{}).filter(page=>{
-   const info=page.imageinfo?.[0],title=(page.title||'').toLowerCase();
-   const description=(info?.extmetadata?.ImageDescription?.value||'').replace(/<[^>]*>/g,' ').toLowerCase();
-   const combined=title+' '+description;
-   const matches=words.filter(w=>combined.includes(w)).length;
-   return info?.mime==='image/jpeg'&&matches>=Math.min(2,words.length)&&!/(illustration|drawing|cartoon|clipart|logo|icon|diagram)/.test(title);
-  });
-  return candidates[0]?.imageinfo?.[0]?.thumburl||null;
- }catch{return null}
-}
+// Only accept an exact, explicitly approved food-catalog dish match.
+// Broad image searches can return anatomy diagrams or unrelated pictures.
+// Default meals without a confirmed catalog match display a safe placeholder.
+const approvedFoodMatches={
+ 'Spaghetti with Meat Sauce':['Spaghetti Bolognese'],
+ 'Tacos':['Tacos'],
+ 'Homemade Pizza':['Pizza'],
+ 'Chicken Alfredo':['Fettuccine Alfredo'],
+ 'Chicken Fajitas':['Chicken Fajita','Chicken Fajitas'],
+ 'Beef Stroganoff':['Beef Stroganoff'],
+ 'Chicken Parmesan':['Chicken Parmigiana'],
+ 'Chicken Pot Pie':['Chicken Pot Pie'],
+ 'Baked Ziti':['Baked Ziti'],
+ 'Chili and Cornbread':['Chilli'],
+ 'Sloppy Joes':['Sloppy Joe'],
+ 'Meatloaf and Mashed Potatoes':['Meatloaf'],
+ 'Grilled Cheese and Tomato Soup':['Grilled Cheese'],
+ 'Cheeseburgers and Fries':['Beef Burger'],
+ 'Chef Salad':['Salad']
+};
+const normalizedFood=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
 async function fetchDishPhoto(name){
  if(photoCache.has(name))return photoCache.get(name);
- const terms=[foodAliases[name]||name,name].filter((v,i,a)=>a.indexOf(v)===i);
+ const isDefault=defaults.includes(name);
+ // For custom meals, only exact recipe-title matches are acceptable.
+ const terms=isDefault?(approvedFoodMatches[name]||[]):[name];
  let url=null;
  for(const term of terms){
   try{
    const response=await fetch('https://www.themealdb.com/api/json/v1/1/search.php?s='+encodeURIComponent(term));
    if(!response.ok)continue;
-   const data=await response.json(),dishes=data.meals||[];
-   const normalized=term.toLowerCase();
-   const match=dishes.find(m=>m.strMeal.toLowerCase()===normalized)||dishes.find(m=>m.strMeal.toLowerCase().includes(normalized));
+   const data=await response.json();
+   const match=(data.meals||[]).find(m=>normalizedFood(m.strMeal||'')===normalizedFood(term));
    if(match?.strMealThumb){url=match.strMealThumb;break}
-  }catch(e){/* photo lookup optional */}
+  }catch(e){/* No photo is safer than an unrelated photo. */}
  }
- if(!url)url=await fetchCommonsPhoto(name);
  photoCache.set(name,url);
  return url;
 }
-function showMealPhoto(name,category){hideMealPhoto();const request=photoRequest;$('revealPlaceholder').textContent=category==='out'?'Restaurant selected — photo unavailable':'Photo unavailable for this dish';if(category==='out')return;fetchDishPhoto(name).then(url=>{if(request!==photoRequest||!url)return;const img=$('revealImage');img.onload=()=>{if(request!==photoRequest)return;$('revealPlaceholder').classList.add('hidden');img.classList.remove('hidden')};img.onerror=()=>{if(request!==photoRequest)return;img.classList.add('hidden');$('revealPlaceholder').classList.remove('hidden')};img.alt='Photo of '+name;img.src=url})}
+function showMealPhoto(name,category){hideMealPhoto();const request=photoRequest;$('revealPlaceholder').textContent=category==='out'?'Restaurant selected — photo unavailable':'🍽️ A delicious dinner awaits!' ;if(category==='out')return;fetchDishPhoto(name).then(url=>{if(request!==photoRequest||!url)return;const img=$('revealImage');img.onload=()=>{if(request!==photoRequest)return;$('revealPlaceholder').classList.add('hidden');img.classList.remove('hidden')};img.onerror=()=>{if(request!==photoRequest)return;img.classList.add('hidden');$('revealPlaceholder').classList.remove('hidden')};img.alt='Photo of '+name;img.src=url})}
 function openReveal(name,category){$('revealName').textContent=name;$('revealCategory').textContent=category==='out'?'Eat Out':'Cook at home';$('revealMessage').textContent='';$('revealConfirm').disabled=false;$('revealConfirm').textContent='Confirm Dinner';$('dinnerReveal').classList.remove('hidden');document.body.classList.add('reveal-open');$('revealClose').focus();showMealPhoto(name,category)}
 function closeReveal(){$('dinnerReveal').classList.add('hidden');document.body.classList.remove('reveal-open');hideMealPhoto()}
 $('revealClose').onclick=closeReveal;
