@@ -12,7 +12,7 @@
 <section class="panel"><h2>📍 Restaurants <span id="restaurantCount" class="tag"></span></h2><div class="row"><input id="zip" inputmode="numeric" pattern="[0-9]*" maxlength="5" placeholder="Enter ZIP Code"><button id="findNearby" class="tiny">Find nearby</button></div><p id="zipStatus" class="muted">Search results are temporary. Your saved restaurants stay separate.</p><div id="searchPanel" class="hidden"><div class="row" style="justify-content:space-between;margin:10px 0"><strong id="searchHeading">Nearby restaurants</strong><button id="clearSearch" class="tiny">Clear Search Results</button></div><div class="buttons"><button id="saveAllResults" class="secondary">Save All</button><button id="saveSelectedResults" class="secondary">Save Selected</button></div><details><summary>View search results and select favorites</summary><div id="searchResultList"></div></details><p class="muted">Search results join your saved restaurants in the tumbler until you clear or replace this search. They are not saved as favorites unless you choose to save them.</p></div><div id="restaurantBackup" class="hidden" style="margin:9px 0 15px"><a id="mapsFallback" class="tiny" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none" href="#">Find restaurants on Google Maps ↗</a><p class="muted">If automatic lookup is unavailable, find a restaurant on Maps and add its name below.</p></div><div class="row"><input id="newRestaurant" placeholder="Add a restaurant" maxlength="90"><button id="addRestaurant" class="tiny">Add</button></div><details><summary>View and edit restaurants</summary><div id="restaurantList"></div></details></section><p class="foot">Your meals, restaurants and votes are saved in this browser on this device.</p></main>
 <div id="dinnerReveal" class="reveal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="revealTitle"><div class="reveal-card"><div class="reveal-head"><span>4DNNR</span><button id="revealClose" class="reveal-close" aria-label="Close dinner selection">×</button></div><h2 id="revealTitle">Tonight’s Dinner!</h2><img id="revealImage" class="reveal-image hidden" alt=""><div id="revealPlaceholder" class="reveal-placeholder">Your dinner is selected!</div><div id="revealName" class="reveal-name"></div><p id="revealCategory" class="reveal-category"></p><button id="revealConfirm" class="primary orange reveal-confirm">Confirm Dinner</button><div class="reveal-secondary"><button id="revealAgain" class="secondary">Pick Again</button><button id="revealPropose" class="secondary">Propose for Vote</button></div><p id="revealMessage" class="reveal-message" role="status"></p></div></div><script>
 const defaults=['Spaghetti with Meat Sauce','Tacos','Cheeseburgers and Fries','Baked Chicken and Rice','Homemade Pizza','Grilled Chicken with Vegetables','Meatloaf and Mashed Potatoes','Chicken Alfredo','Sloppy Joes','Pork Chops and Potatoes','Beef Stir-Fry with Rice','BBQ Chicken Sandwiches','Chicken Quesadillas','Baked Ziti','Breakfast for Dinner','Chili and Cornbread','Chicken Parmesan','Hot Dogs and Fries','Beef and Bean Burritos','Grilled Cheese and Tomato Soup','Baked Salmon with Potatoes','Chicken Fajitas','Beef Stroganoff','BBQ Pulled Pork Sandwiches','Chicken Pot Pie','Sausage and Peppers','Steak and Baked Potatoes','Chicken Tenders and Fries','Chicken Caesar Salad','Chef Salad'];
-const $=id=>document.getElementById(id), load=(key,fallback)=>{try{const v=JSON.parse(localStorage.getItem('dinner_'+key));return v??fallback}catch{return fallback}},save=(key,v)=>localStorage.setItem('dinner_'+key,JSON.stringify(v));let meals=load('meals',defaults),restaurants=load('restaurants',[]),proposal=load('proposal',null),mode=load('mode','cook'),selected=null,spinning=false,dinnerHistory=load('dinnerHistory',[]),temporarySearch=load('temporarySearch',null);const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=id=>document.getElementById(id), load=(key,fallback)=>{try{const v=JSON.parse(localStorage.getItem('dinner_'+key));return v??fallback}catch{return fallback}},save=(key,v)=>localStorage.setItem('dinner_'+key,JSON.stringify(v));let meals=load('meals',defaults),restaurants=load('restaurants',[]),proposal=load('proposal',null),mode=load('mode','cook'),selected=null,spinning=false,dinnerHistory=load('dinnerHistory',[]),temporarySearch=null;const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let profile=load('profile',null);if(!profile){const oldName=load('person','');if(oldName){profile={id:crypto.randomUUID(),name:oldName};save('profile',profile)}}
 let person=profile?.name||'',pendingProposal=false,selectedCategory=null;
 // Thirty bundled photorealistic meal images, aligned with the 30 default meals.
@@ -54,6 +54,7 @@ const photoCache=new Map();
 function hideMealPhoto(){photoRequest++;$('mealPhoto').style.display='none';$('mealPhotoImg').removeAttribute('src');$('revealImage').classList.add('hidden');$('revealImage').removeAttribute('src');$('revealPlaceholder').classList.remove('hidden')}
 // Custom meals use only exact catalog matches, never fuzzy image search.
 async function fetchDishPhoto(name){
+ if(customPhotos[name])return customPhotos[name];
  const index=defaults.indexOf(name);
  if(index!==-1)return bundledMealPhotos[index];
  if(photoCache.has(name))return photoCache.get(name);
@@ -63,7 +64,8 @@ async function fetchDishPhoto(name){
   if(response.ok){
    const data=await response.json();
    const normalize=s=>String(s).toLowerCase().replace(/[^a-z0-9]/g,'');
-   const match=(data.meals||[]).find(m=>normalize(m.strMeal)===normalize(name));
+   const requested=name.toLowerCase().split(/[^a-z]+/).filter(w=>w.length>2);
+    const match=(data.meals||[]).find(m=>normalize(m.strMeal)===normalize(name))||(data.meals||[]).find(m=>requested.length>=2&&requested.every(w=>m.strMeal.toLowerCase().includes(w)));
    if(match?.strMealThumb)url=match.strMealThumb;
   }
  }catch(e){}
@@ -115,14 +117,50 @@ $('voteWindow').value=String(load('voteWindow',0));
 $('voteWindow').addEventListener('change',()=>save('voteWindow',Number($('voteWindow').value)));
 function renderVote(){if(!proposal){$('noProposal').classList.remove('hidden');$('activeProposal').classList.add('hidden');return}$('noProposal').classList.add('hidden');$('activeProposal').classList.remove('hidden');$('proposalName').textContent=(proposal.category==='out'?'🍽️ Eat Out: ':proposal.category==='cook'?'🍳 Cook: ':'')+proposal.name;$('proposedBy').textContent=proposal.proposedBy?'Proposed by '+proposal.proposedBy:'';$('proposalState').textContent=proposal.status==='confirmed'?'Dinner confirmed':proposal.status==='closed'?'Voting closed':'Voting open';tick();$('voteForm').classList.toggle('hidden',proposal.status!=='open');const isOrganizer=!!profile&&proposal.proposedById===profile.id;$('organizerButtons').classList.toggle('hidden',proposal.status==='confirmed'||!isOrganizer);$('closeVote').classList.toggle('hidden',proposal.status!=='open'||!isOrganizer);$('finalDinner').classList.toggle('hidden',proposal.status!=='confirmed');$('finalDinner').textContent=proposal.status==='confirmed'?'🎉 Tonight: '+proposal.name:'';const votes=Object.entries(proposal.votes||{});for(const v of ['yes','no','either'])$(v+'Count').textContent=votes.filter(([,x])=>x===v).length;$('voters').textContent=votes.length?'Votes: '+votes.map(([name,v])=>(proposal.voterNames?.[name]||name)+' ('+({yes:'Yes',no:'No',either:'Either'}[v])+')').join(' · '):'No votes yet';const voteKey=profile?.id;document.querySelectorAll('[data-vote]').forEach(b=>b.classList.toggle('selected',!!voteKey&&(proposal.votes[voteKey]||proposal.votes[person.toLowerCase()])===b.dataset.vote));tick()}
 $('voterName').addEventListener('input',renderVote);document.querySelectorAll('[data-vote]').forEach(b=>b.onclick=()=>{if(!proposal||proposal.status!=='open')return;if(!usePerson())return;const name=$('voterName').value.trim();if(!name){$('voterName').focus();$('voterName').placeholder='Enter your name to vote';return}proposal.voterNames=proposal.voterNames||{};delete proposal.votes[name.toLowerCase()];proposal.votes[profile.id]=b.dataset.vote;proposal.voterNames[profile.id]=profile.name;save('proposal',proposal);renderVote()});$('confirm').onclick=()=>{if(!proposal||!profile||proposal.proposedById!==profile.id||proposal.status==='confirmed')return;proposal.status='confirmed';save('proposal',proposal);recordDinner(proposal.name);renderVote()};$('closeVote').onclick=()=>{if(!proposal||!profile||proposal.proposedById!==profile.id||proposal.status!=='open')return;proposal.status='closed';save('proposal',proposal);renderVote()};$('spinAgain').onclick=()=>{if(!proposal||!profile||proposal.proposedById!==profile.id)return;if(!confirm('Clear this proposal and pick again?'))return;proposal=null;save('proposal',null);renderVote();spin();window.scrollTo({top:0,behavior:'smooth'})};
-function renderList(kind){const a=kind==='meals'?meals:restaurants,id=kind==='meals'?'mealList':'restaurantList';$(kind==='meals'?'mealCount':'restaurantCount').textContent=a.length+' saved';$(id).innerHTML=a.length?a.map((name,i)=>'<div class="item"><span>'+escapeHTML(name)+'</span><button class="tiny" data-remove="'+kind+'" data-index="'+i+'" aria-label="Remove '+escapeHTML(name)+'">✕</button></div>').join(''):'<p class="muted">Nothing saved yet.</p>';document.querySelectorAll('[data-remove="'+kind+'"]').forEach(b=>b.onclick=()=>{a.splice(Number(b.dataset.index),1);save(kind,a);renderList(kind);renderRotation();renderSearchResults();showWheel('')})}function add(kind){const input=$(kind==='meals'?'newMeal':'newRestaurant'),name=input.value.trim(),a=kind==='meals'?meals:restaurants;if(!name)return;if(a.some(x=>x.toLowerCase()===name.toLowerCase())){input.value='';return}a.push(name);save(kind,a);input.value='';renderList(kind);renderRotation();renderSearchResults()}$('addMeal').onclick=()=>add('meals');$('addRestaurant').onclick=()=>add('restaurants');$('newMeal').onkeydown=e=>{if(e.key==='Enter')add('meals')};$('newRestaurant').onkeydown=e=>{if(e.key==='Enter')add('restaurants')};$('resetMeals').onclick=()=>{if(confirm('Restore the original 30 meals? This replaces your current meal list.')){meals=[...defaults];save('meals',meals);renderList('meals');renderRotation()}};
+// Custom photo overrides are stored on this device only, compressed to conserve space.
+let customPhotos=load('customPhotos',{});
+function renameSaved(kind,index){
+ const a=kind==='meals'?meals:restaurants,old=a[index];
+ const next=prompt('Edit '+(kind==='meals'?'meal':'restaurant')+' name:',old);
+ if(next===null)return;const name=next.trim().slice(0,90);
+ if(!name){alert('Name cannot be empty.');return}
+ if(a.some((v,i)=>i!==index&&v.toLowerCase()===name.toLowerCase())){alert('That name already exists.');return}
+ a[index]=name;save(kind,a);
+ if(kind==='meals'){
+  if(customPhotos[old]){customPhotos[name]=customPhotos[old];delete customPhotos[old];save('customPhotos',customPhotos)}
+  if(photoCache.has(old)){photoCache.set(name,photoCache.get(old));photoCache.delete(old)}
+  dinnerHistory=dinnerHistory.map(x=>x.name.toLowerCase()===old.toLowerCase()?{...x,name}:x);save('dinnerHistory',dinnerHistory);
+ }
+ if(selected===old){selected=name;$('picked').textContent=name}
+ renderList(kind);renderRotation();renderSearchResults();showWheel('');
+}
+function uploadMealPhoto(index){const name=meals[index];const chooser=document.createElement('input');chooser.type='file';chooser.accept='image/*';chooser.onchange=()=>{
+ const file=chooser.files?.[0];if(!file)return;if(file.size>15*1024*1024){alert('Choose an image under 15 MB.');return}
+ const reader=new FileReader();reader.onerror=()=>alert('Unable to read that photo.');reader.onload=()=>{
+ const img=new Image();img.onerror=()=>alert('Unable to open that image.');img.onload=()=>{
+  const canvas=document.createElement('canvas');const scale=Math.min(1,900/img.width,900/img.height);canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+  const data=canvas.toDataURL('image/jpeg',.72);const previous=customPhotos[name];customPhotos[name]=data;
+  try{save('customPhotos',customPhotos);photoCache.delete(name);renderList('meals')}catch(e){if(previous)customPhotos[name]=previous;else delete customPhotos[name];alert('This browser is out of photo storage. Try a smaller image or remove an older photo.')}
+ };img.src=reader.result;
+ };reader.readAsDataURL(file);
+ };chooser.click()}
+function renderList(kind){
+ const a=kind==='meals'?meals:restaurants,id=kind==='meals'?'mealList':'restaurantList';
+ $(kind==='meals'?'mealCount':'restaurantCount').textContent=a.length+' saved';
+ $(id).innerHTML=a.length?a.map((name,i)=>'<div class="item"><span>'+escapeHTML(name)+(kind==='meals'&&customPhotos[name]?' <small class="muted">📷</small>':'')+'</span><div class="row" style="flex:0 0 auto;gap:5px"><button class="tiny" data-edit="'+kind+'" data-index="'+i+'" aria-label="Edit '+escapeHTML(name)+'">✎ Edit</button>'+(kind==='meals'?'<button class="tiny" data-photo="'+i+'" aria-label="Upload photo for '+escapeHTML(name)+'">📷</button>':'')+'<button class="tiny" data-remove="'+kind+'" data-index="'+i+'" aria-label="Remove '+escapeHTML(name)+'">✕</button></div></div>').join(''):'<p class="muted">Nothing saved yet.</p>';
+ $(id).querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>renameSaved(kind,Number(b.dataset.index)));
+ $(id).querySelectorAll('[data-photo]').forEach(b=>b.onclick=()=>uploadMealPhoto(Number(b.dataset.photo)));
+ $(id).querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const index=Number(b.dataset.index),old=a[index];if(kind==='meals'&&customPhotos[old]){delete customPhotos[old];save('customPhotos',customPhotos)}a.splice(index,1);save(kind,a);renderList(kind);renderRotation();renderSearchResults();showWheel('')});
+}
+function add(kind){const input=$(kind==='meals'?'newMeal':'newRestaurant'),name=input.value.trim(),a=kind==='meals'?meals:restaurants;if(!name)return;if(a.some(x=>x.toLowerCase()===name.toLowerCase())){input.value='';return}a.push(name);save(kind,a);input.value='';renderList(kind);renderRotation();renderSearchResults()}
+$('addMeal').onclick=()=>add('meals');$('addRestaurant').onclick=()=>add('restaurants');$('newMeal').onkeydown=e=>{if(e.key==='Enter')add('meals')};$('newRestaurant').onkeydown=e=>{if(e.key==='Enter')add('restaurants')};$('resetMeals').onclick=()=>{if(confirm('Restore the original 30 meals? This replaces your current meal list.')){meals=[...defaults];save('meals',meals);renderList('meals');renderRotation()}};
 // Google Maps JavaScript Places library: the key is entered on each device,
 // not embedded in the public GitHub Pages source. Restrict it to the website.
 // Remember the ZIP and key for this browser and GitHub Pages origin.
 // A key must never be hardcoded into a public repository.
 const KEY_STORAGE='dinner_google_places_key';
 const ZIP_STORAGE='dinner_last_zip';
-$('zip').value=localStorage.getItem(ZIP_STORAGE)||'';
+$('zip').value='';localStorage.removeItem(ZIP_STORAGE);localStorage.removeItem('dinner_temporarySearch');
 let googleMapsLoader=null;
 function loadGoogleMaps(key){
  if(window.google?.maps?.importLibrary)return Promise.resolve();
@@ -159,13 +197,13 @@ function saveSearchChoices(all){
  save('restaurants',restaurants);renderList('restaurants');renderSearchResults();
  $('zipStatus').textContent=added+' restaurant'+(added===1?'':'s')+' saved to My Restaurants. Search results remain available until cleared.';
 }
-$('saveAllResults').onclick=()=>saveSearchChoices(true);
+$('saveAllResults').onclick=()=>{const unsaved=(temporarySearch?.names||[]).filter(n=>!restaurants.some(r=>r.toLowerCase()===n.toLowerCase()));if(unsaved.length&&confirm('Save all '+unsaved.length+' unsaved restaurants to My Restaurants?'))saveSearchChoices(true)};
 $('saveSelectedResults').onclick=()=>saveSearchChoices(false);
-$('clearSearch').onclick=()=>{temporarySearch=null;searchCheckboxSelection=null;save('temporarySearch',null);renderSearchResults();$('zipStatus').textContent='Search cleared. Eat Out now uses only your saved restaurants.';if(mode==='out'||mode==='surprise'){selected=null;selectedCategory=null;$('picked').textContent='';showWheel('')}};
+$('clearSearch').onclick=()=>{temporarySearch=null;searchCheckboxSelection=null;$('zip').value='';renderSearchResults();$('zipStatus').textContent='Search cleared. Eat Out now uses only your saved restaurants.';if(mode==='out'||mode==='surprise'){selected=null;selectedCategory=null;$('picked').textContent='';showWheel('')}};
 $('findNearby').onclick=async()=>{
  const zip=$('zip').value.trim(),status=$('zipStatus'),btn=$('findNearby'),backup=$('restaurantBackup');
  if(!/^\d{5}$/.test(zip)){status.textContent='Enter a valid 5-digit US ZIP Code.';return}
- localStorage.setItem(ZIP_STORAGE,zip);
+ // ZIP is session-only; never persist it.
  $('mapsFallback').href='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent('restaurants near '+zip+' USA');
  backup.classList.add('hidden');
  let key=(localStorage.getItem(KEY_STORAGE)||'').trim();
@@ -209,7 +247,7 @@ $('findNearby').onclick=async()=>{
   if(!found.size&&errors.length)throw Error(errors.join('; '));
   const names=[...new Set([...found.values()])].sort((a,b)=>a.localeCompare(b));
   temporarySearch={zip,names,updated:Date.now()};
-  searchCheckboxSelection=null;save('temporarySearch',temporarySearch);renderSearchResults();
+  searchCheckboxSelection=null;renderSearchResults();
   status.textContent=names.length+' restaurant names found near '+zip+'. They are ready in the tumbler but have not been added to My Restaurants.'+(errors.length?' Some search methods were unavailable.':'');
   if(!names.length)backup.classList.remove('hidden');
  }catch(err){
