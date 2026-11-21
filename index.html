@@ -10,7 +10,7 @@
 <section class="panel" id="rotationPanel"><details id="rotationDropdown" style="margin-top:0"><summary style="font-size:20px">🕒 Haven’t Had Recently</summary><p class="muted">Meals you haven't eaten in the longest time appear first. Tap Had it or Confirm Dinner to hide a meal here for 14 days.</p><label for="recentMealSelect" class="muted">Choose a meal</label><div class="row" style="margin-top:8px"><select id="recentMealSelect" aria-label="Haven’t Had Recently"></select><button class="tiny" id="recordRecentMeal">Had it</button></div><div id="rotationList" class="muted" style="margin-top:8px"></div></details><details><summary>Recent dinner history</summary><div id="dinnerHistory"></div><button class="tiny" id="clearHistory" style="margin-top:10px">Clear dinner history</button></details></section>
 <section class="panel"><h2>🍲 My meals <span id="mealCount" class="tag"></span></h2><div class="row"><input id="newMeal" placeholder="Add a meal" maxlength="90"><button id="addMeal" class="tiny">Add</button></div><details><summary>View and edit meals</summary><div id="mealList"></div><button class="tiny" id="resetMeals" style="margin-top:12px">Restore default meals</button></details></section>
 <section class="panel"><h2>📍 Restaurants <span id="restaurantCount" class="tag"></span></h2><div class="row"><input id="zip" inputmode="numeric" pattern="[0-9]*" maxlength="5" placeholder="Enter ZIP Code"><button id="findNearby" class="tiny">Find nearby</button></div><p id="zipStatus" class="muted">Search results are temporary. Your saved restaurants stay separate.</p><div id="searchPanel" class="hidden"><div class="row" style="justify-content:space-between;margin:10px 0"><strong id="searchHeading">Nearby restaurants</strong><button id="clearSearch" class="tiny">Clear Search Results</button></div><div class="buttons"><button id="saveAllResults" class="secondary">Save All</button><button id="saveSelectedResults" class="secondary">Save Selected</button></div><details><summary>View search results and select favorites</summary><div id="searchResultList"></div></details><p class="muted">Search results join your saved restaurants in the tumbler until you clear or replace this search. They are not saved as favorites unless you choose to save them.</p></div><div id="restaurantBackup" class="hidden" style="margin:9px 0 15px"><a id="mapsFallback" class="tiny" target="_blank" rel="noopener noreferrer" style="display:inline-block;text-decoration:none" href="#">Find restaurants on Google Maps ↗</a><p class="muted">If automatic lookup is unavailable, find a restaurant on Maps and add its name below.</p></div><div class="row"><input id="newRestaurant" placeholder="Add a restaurant" maxlength="90"><button id="addRestaurant" class="tiny">Add</button></div><details><summary>View and edit restaurants</summary><div id="restaurantList"></div></details></section><p class="foot">Your meals, restaurants and votes are saved in this browser on this device.</p></main>
-<div id="dinnerReveal" class="reveal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="revealTitle"><div class="reveal-card"><div class="reveal-head"><span>4DNNR</span><button id="revealClose" class="reveal-close" aria-label="Close dinner selection">×</button></div><h2 id="revealTitle">Tonight’s Dinner!</h2><img id="revealImage" class="reveal-image hidden" alt=""><div id="revealPlaceholder" class="reveal-placeholder">Your dinner is selected!</div><div id="revealName" class="reveal-name"></div><p id="revealCategory" class="reveal-category"></p><button id="revealConfirm" class="primary orange reveal-confirm">Confirm Dinner</button><div class="reveal-secondary"><button id="revealAgain" class="secondary">Pick Again</button><button id="revealPropose" class="secondary">Propose for Vote</button></div><p id="revealMessage" class="reveal-message" role="status"></p></div></div><script>
+<div id="dinnerReveal" class="reveal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="revealTitle"><div class="reveal-card"><div class="reveal-head"><span>4DNNR</span><button id="revealClose" class="reveal-close" aria-label="Close dinner selection">×</button></div><h2 id="revealTitle">Tonight’s Dinner!</h2><img id="revealImage" class="reveal-image hidden" alt=""><div id="revealPlaceholder" class="reveal-placeholder">Your dinner is selected!</div><button id="revealAddPhoto" class="tiny hidden" style="margin-top:9px" type="button">📷 Add a photo for this meal</button><div id="revealName" class="reveal-name"></div><p id="revealCategory" class="reveal-category"></p><button id="revealConfirm" class="primary orange reveal-confirm">Confirm Dinner</button><div class="reveal-secondary"><button id="revealAgain" class="secondary">Pick Again</button><button id="revealPropose" class="secondary">Propose for Vote</button></div><p id="revealMessage" class="reveal-message" role="status"></p></div></div><script>
 const defaults=['Spaghetti with Meat Sauce','Tacos','Cheeseburgers and Fries','Baked Chicken and Rice','Homemade Pizza','Grilled Chicken with Vegetables','Meatloaf and Mashed Potatoes','Chicken Alfredo','Sloppy Joes','Pork Chops and Potatoes','Beef Stir-Fry with Rice','BBQ Chicken Sandwiches','Chicken Quesadillas','Baked Ziti','Breakfast for Dinner','Chili and Cornbread','Chicken Parmesan','Hot Dogs and Fries','Beef and Bean Burritos','Grilled Cheese and Tomato Soup','Baked Salmon with Potatoes','Chicken Fajitas','Beef Stroganoff','BBQ Pulled Pork Sandwiches','Chicken Pot Pie','Sausage and Peppers','Steak and Baked Potatoes','Chicken Tenders and Fries','Chicken Caesar Salad','Chef Salad'];
 const $=id=>document.getElementById(id), load=(key,fallback)=>{try{const v=JSON.parse(localStorage.getItem('dinner_'+key));return v??fallback}catch{return fallback}},save=(key,v)=>localStorage.setItem('dinner_'+key,JSON.stringify(v));let meals=load('meals',defaults),restaurants=load('restaurants',[]),proposal=load('proposal',null),mode=load('mode','cook'),selected=null,spinning=false,dinnerHistory=load('dinnerHistory',[]),temporarySearch=null;const escapeHTML=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let profile=load('profile',null);if(!profile){const oldName=load('person','');if(oldName){profile={id:crypto.randomUUID(),name:oldName};save('profile',profile)}}
@@ -51,8 +51,8 @@ const bundledMealPhotos=[
 ];
 let photoRequest=0;
 const photoCache=new Map();
-function hideMealPhoto(){photoRequest++;$('mealPhoto').style.display='none';$('mealPhotoImg').removeAttribute('src');$('revealImage').classList.add('hidden');$('revealImage').removeAttribute('src');$('revealPlaceholder').classList.remove('hidden')}
-// Custom meals use only exact catalog matches, never fuzzy image search.
+function hideMealPhoto(){photoRequest++;$('mealPhoto').style.display='none';$('mealPhotoImg').removeAttribute('src');$('revealImage').classList.add('hidden');$('revealImage').removeAttribute('src');$('revealPlaceholder').classList.remove('hidden');$('revealAddPhoto').classList.add('hidden')}
+// Try an exact catalog match, then a conservative partial-name lookup. Custom photos override both.
 async function fetchDishPhoto(name){
  if(customPhotos[name])return customPhotos[name];
  const index=defaults.indexOf(name);
@@ -69,22 +69,43 @@ async function fetchDishPhoto(name){
    if(match?.strMealThumb)url=match.strMealThumb;
   }
  }catch(e){}
+ // TheMealDB often indexes a dish by its distinguishing word instead of its full name.
+ // Require all meaningful words to match to avoid showing unrelated food.
+ if(!url){
+  const words=name.toLowerCase().match(/[a-z]{4,}/g)||[];
+  const distinctive=words.filter(w=>!['with','and','style','homemade','baked','grilled'].includes(w));
+  for(const term of [...distinctive].reverse().slice(0,2)){
+   try{
+    const r=await fetch('https://www.themealdb.com/api/json/v1/1/search.php?s='+encodeURIComponent(term));
+    if(!r.ok)continue;
+    const d=await r.json();
+    const m=(d.meals||[]).find(x=>distinctive.every(w=>x.strMeal.toLowerCase().includes(w)));
+    if(m?.strMealThumb){url=m.strMealThumb;break}
+   }catch(e){}
+  }
+ }
  photoCache.set(name,url);return url;
 }
 function showMealPhoto(name,category){
  hideMealPhoto();const request=photoRequest;
  $('revealPlaceholder').textContent=category==='out'?'Restaurant selected — photo unavailable':'🍽️ A delicious dinner awaits!';
  if(category==='out')return;
+ $('revealAddPhoto').classList.remove('hidden');
  fetchDishPhoto(name).then(url=>{
   if(request!==photoRequest||!url)return;
   const img=$('revealImage');
-  img.onload=()=>{if(request!==photoRequest)return;$('revealPlaceholder').classList.add('hidden');img.classList.remove('hidden')};
+  img.onload=()=>{if(request!==photoRequest)return;$('revealPlaceholder').classList.add('hidden');$('revealAddPhoto').classList.add('hidden');img.classList.remove('hidden')};
   img.onerror=()=>{if(request!==photoRequest)return;img.classList.add('hidden');$('revealPlaceholder').classList.remove('hidden')};
   img.alt='Food image of '+name;img.src=url;
  });
 }
 function openReveal(name,category){$('revealName').textContent=name;$('revealCategory').textContent=category==='out'?'Eat Out':'Cook at home';$('revealMessage').textContent='';$('revealConfirm').disabled=false;$('revealConfirm').textContent='Confirm Dinner';$('dinnerReveal').classList.remove('hidden');document.body.classList.add('reveal-open');$('revealClose').focus();showMealPhoto(name,category)}
 function closeReveal(){$('dinnerReveal').classList.add('hidden');document.body.classList.remove('reveal-open');hideMealPhoto()}
+$('revealAddPhoto').onclick=()=>{
+ const i=meals.indexOf($('revealName').textContent);
+ if(i<0)return;
+ uploadMealPhoto(i);
+};
 $('revealClose').onclick=closeReveal;
 $('dinnerReveal').addEventListener('click',e=>{if(e.target===$('dinnerReveal'))closeReveal()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dinnerReveal').classList.contains('hidden'))closeReveal()});
@@ -140,7 +161,7 @@ function uploadMealPhoto(index){const name=meals[index];const chooser=document.c
  const img=new Image();img.onerror=()=>alert('Unable to open that image.');img.onload=()=>{
   const canvas=document.createElement('canvas');const scale=Math.min(1,900/img.width,900/img.height);canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
   const data=canvas.toDataURL('image/jpeg',.72);const previous=customPhotos[name];customPhotos[name]=data;
-  try{save('customPhotos',customPhotos);photoCache.delete(name);renderList('meals')}catch(e){if(previous)customPhotos[name]=previous;else delete customPhotos[name];alert('This browser is out of photo storage. Try a smaller image or remove an older photo.')}
+  try{save('customPhotos',customPhotos);photoCache.delete(name);renderList('meals');if(!$('dinnerReveal').classList.contains('hidden')&&$('revealName').textContent===name)showMealPhoto(name,'cook')}catch(e){if(previous)customPhotos[name]=previous;else delete customPhotos[name];alert('This browser is out of photo storage. Try a smaller image or remove an older photo.')}
  };img.src=reader.result;
  };reader.readAsDataURL(file);
  };chooser.click()}
